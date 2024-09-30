@@ -1,0 +1,345 @@
+---
+title: "Data cleaning and wrangling"
+author: "Oscar Garcia"
+date: "2024-09-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Summary: 
+The following R.Markdown script transforms the original CSES Module 5 Full Release dataset to enhance its readability and usability. To do so, it first renames the variables and codes missing values as such (Section 2, Data cleaning). Consequently, it generates derived variables from the ones available, to use in further analyses (Section 3, Data wrangling). Finally, it merges the dataset with another retrieving each country's immigration rate (Section 5, Merge additional datasets). inal procedures ensure only relevant analysis variables are elected and a new dataset df_nationalism is saved.
+  
+#1. Preparatory tasks
+##1.a) Reset space and charge libraries
+
+```{r, echo=FALSE}
+rm(list=ls()) # Clean workspace
+options(scipen=10000) # Set scientific notation
+library(tidyverse)
+```
+
+##1.b) Open dataset 
+The dataset can be retrieved in "https://cses.org/data-download/cses-module-5-2016-2021/" as a CSV.file
+
+```{r}
+df_nationalism <- read.csv("C:/Users/oscar/Documents/Projects/Paper- Lv2EffectsOnNationalIdentity/Quantitative Analysis/Data/cses5.csv", header = TRUE, sep = ",")
+```
+
+#2. Data cleaning: 
+Task: coding variable names, coding NAs.
+
+##2.a) List and change name for all variables of interest:
+
+```{r}
+df_nationalism$E2012 <- as.integer(df_nationalism$E2012)
+
+df_nationalism <- df_nationalism %>%
+  mutate(polweight = E1012_2,
+         selfpleftright = E3020,
+         countryyear = E1004,
+         countrycode = E1006_UNALPHA2, #
+         countryname = E1006_NAM,
+         electionyear = E1008, #
+         surveyyear = E1034,
+         birthyear = E2001_Y, #
+         gender = E2002, #
+         edulvl = E2003,
+         quintinc = E2010,
+         birthcountry = E2017, #
+         parentforeign = E2018,
+         ruralurban = E2022,
+         ougrcusttrad = E3005_1, #
+         ougrmajwill = E3005_2, #
+         econ_immig = E3005_3, #
+         cult_immig = E3005_4, #
+         sec_immig = E3005_5, #
+         birthplace = E3006_1, #
+         ancestry = E3006_2, #
+         language = E3006_3, #
+         customstraditions = E3006_4, #
+         l2gini = E5092, #           >>>         GINI COEFFICIENT OF EQUALIZED DISPOSABLE INCOME
+         l2inflationt0 = E5095_1, #  >>>         INFLATION, GDP DEFLATOR (ANNUAL %) (WORLD BANK) - TIME T
+         l2gdpgrowtht0 = E5093_1, #  >>>         GDP GROWTH - ANNUAL % (WORLD BANK) - TIME T
+         l2gdpgrowtht1 = E5093_2, #  >>>         GDP GROWTH - ANNUAL % (WORLD BANK) - TIME T-1
+         l2gdpgrowtht2 = E5093_3, #  >>>         GDP GROWTH - ANNUAL % (WORLD BANK) - TIME T-2
+         l2gdpcapt0 = E5094_1, #     >>>         GDP PER CAPITA, PPP (WORLD BANK) - TIME T
+         l2hdit0 = E5097_1, #        >>>         HUMAN DEVELOPMENT INDEX (UNPD) - TIME T
+         l2netmig15_20 = E5105_4, #  >>>         NET MIGRATION RATE 2015-2020
+         codecountrystudy = E1006_UN) #      >>>         COUNTRY OF STUDY; 3-DIGITS NUMERIC CODE
+```
+
+##2.b) Set missing cases for all variables of interest
+###2.b) 1.- Code to set value 9999 as missing value for election and survey years
+```{r}
+df_nationalism <- df_nationalism %>% 
+  mutate(electionyear = ifelse(electionyear %in% c(9999), NA, electionyear))
+
+```
+
+```{r}
+df_nationalism <- df_nationalism %>% 
+  mutate(surveyyear = ifelse(surveyyear %in% c(9999), NA, surveyyear))
+
+```
+
+###2.b) 2.- Code to set values 9997, 9998 and 9999 as missing value
+```{r}
+df_nationalism <- df_nationalism %>% 
+  mutate(birthyear = ifelse(birthyear %in% c(9997, 9998, 9999), NA, birthyear))
+```
+
+###2.b) 3.- Code to set values 7, 8 and 9 as missing values
+```{r}
+df_nationalism <- df_nationalism %>% 
+  mutate(across(c(gender,
+                  quintinc,
+                  ruralurban,
+                  ougrcusttrad,
+                  ougrmajwill,
+                  econ_immig,
+                  cult_immig,
+                  sec_immig,
+                  birthplace,
+                  ancestry,
+                  language,
+                  customstraditions), 
+                ~ifelse(. %in% c(7, 8, 9), NA, .)))
+```
+
+###2.b) 7.- Code to set values 97, 98 and 99 as missing values:
+
+```{r}
+df_nationalism <- df_nationalism %>% 
+  mutate(across(c(edulvl,
+                  selfpleftright), 
+                ~ifelse(. %in% c(95, 96, 97, 98, 99), NA, .)))
+```
+
+###2.b) 9.- Code to set values 999 missing
+```{r}
+df_nationalism <- df_nationalism %>% 
+  mutate(across(c(l2hdit0,
+                  l2netmig15_20), 
+                ~ifelse(. %in% c(999), NA, .)))
+```
+
+#3. Data wranggling
+##3.a) Create new variable immigrant
+
+```{r}
+# Create immigrant variable
+df_nationalism <- df_nationalism %>%
+  mutate(immigrant = ifelse(codecountrystudy == birthcountry, 1, 0))
+```
+
+
+##3.a) Reverse variables to follow desired order based upon research question 
+###3.a) 1.- Reverse specific attitudinal values to make them follow same order:
+
+```{r}
+
+df_nationalism <- df_nationalism %>%
+  mutate(cult_immig = 6 - cult_immig,
+         sec_immig = 6 - sec_immig,
+         ougrcusttrad = 6 - ougrcusttrad,
+         ougrmajwill = 6 - ougrmajwill,
+         birthplace = 5 - birthplace,
+         ancestry = 5 - ancestry,
+         language = 5 - language,
+         customstraditions = 5 - customstraditions)
+
+```
+
+###3.a) 2.- Reverse ruralurban variable to make it grow with rural, thus easier to read
+
+```{r}
+df_nationalism <- df_nationalism %>%
+  mutate(urbanrural = 5 - ruralurban)
+
+```
+
+##3.b) Create new variables:
+###3.b) 1.- Create age and agerange variables:
+
+```{r}
+df_nationalism <- df_nationalism %>%
+  mutate(age = surveyyear - birthyear)
+
+df_nationalism <- df_nationalism %>%
+  mutate(agerange = case_when(
+    age >= 0 & age <= 20 ~ 1,
+    age > 20 & age <= 25 ~ 2,
+    age > 25 & age <= 30 ~ 3,
+    age > 30 & age <= 35 ~ 4,
+    age > 35 & age <= 40 ~ 5,
+    age > 40 & age <= 45 ~ 6,
+    age > 45 & age <= 50 ~ 7,
+    age > 50 & age <= 55 ~ 8,
+    age > 55 & age <= 60 ~ 9,
+    age > 60 & age <= 65 ~ 10,
+    age > 65 & age <= 70 ~ 11,
+    age > 70 & age <= 75 ~ 12,
+    age > 75 & age <= 80 ~ 13,
+    age > 80 & age <= 100 ~ 14,
+    TRUE ~ NA_real_
+))
+
+```
+
+###3.b) 2.- Create generation variable
+
+```{r}
+df_nationalism <- df_nationalism %>%
+  mutate(generation = case_when(
+    birthyear <= 1927 ~ "Greatest generation: < 1927",
+    between(birthyear, 1928, 1945) ~ "Silent generation: 1928 - 1945",
+    between(birthyear, 1946, 1964) ~ "Baby boomers: 1946 - 1964",
+    between(birthyear, 1965, 1980) ~ "Generation X: 1965 - 1980",
+    between(birthyear, 1981, 1996) ~ "Generation Y: 1981 - 1996",
+    birthyear >= 1997 ~ "Generation Z: > 1997",
+    TRUE ~ NA_character_  # Handle missing or invalid values
+  ))
+
+```
+
+###3.b) 6. Create index of national identity, outer group and immigration attitudinal items:
+
+```{r}
+df_nationalism <- df_nationalism %>%
+  mutate(outergroup = (ougrcusttrad + ougrmajwill + econ_immig + cult_immig + sec_immig)/5,
+         nationalidentity = (birthplace + ancestry + language + customstraditions)/4,
+         perc_immig_effect  = (econ_immig + cult_immig + sec_immig)/3) 
+
+# Create indicators of ethnic and cultural nationalism
+df_nationalism <- df_nationalism %>%
+  mutate(
+    birthplace_num = as.integer(birthplace),
+    ancestry_num = as.integer(ancestry),
+    customs_num = as.integer(customstraditions),
+    language_num = as.integer(language),
+    ethnic = rowMeans(cbind(birthplace_num, ancestry_num)),
+    cultural = rowMeans(cbind(customs_num, language_num)),
+    eth_vs_cult = ethnic - cultural) %>%
+  select(-birthplace_num, -ancestry_num, -customs_num, -language_num)
+
+```
+
+###3.b) 12.- Add missing values to Human Development Index:
+
+```{r}
+# Step 1: Check which countries have missing l2hdit0 values
+countries_with_na <- df_nationalism %>%
+  filter(is.na(l2hdit0)) %>%  # Filter rows where l2hdit0 is NA
+  distinct(countryyear) %>%   # Get distinct countryname values
+  pull(countryyear)           # Extract the countryname column as a vector
+
+# Print countries with missing l2hdit0 values
+print("Countries with missing l2hdit0 values:")
+print(countries_with_na)
+
+# Proceed
+df_nationalism <- df_nationalism %>%
+  mutate(l2hdievolT3 = l2hdit0-l2hdit2)
+
+# Romania in 2016, Lithuania in 2020, and Taiwan in 2016 and 2020 are missing the HDI value, we therefore extract them (0.87) from this UN source (https://hdr.undp.org/data-center/specific-country-data#/countries/LTU ; for Lithuania and Romania) and this Taiwanese Statistical Office Source (https://eng.stat.gov.tw/News_Content.aspx?n=4610&s=233232 ; calculated by Taiwan since the UN does not recognize the country as independent)
+
+# Allocate the missing HDI value to Romania in 2016
+df_nationalism <- df_nationalism %>%
+  mutate(l2hdit0 = if_else(countryname == "Lithuania", 0.88, if_else(countryname == "Romania", 0.815, if_else(countryyear == "TWN_2016", 0.903, if_else(countryyear == "TWN_2020", 0.923, l2hdit0)))))
+
+# Convert l2hdit0 to % scale
+df_nationalism <-df_nationalism %>%
+  mutate(l2hdit0 = l2hdit0 * 100)
+
+df_nationalism <- df_nationalism %>%
+  group_by(countryname) %>%
+  mutate(l2hdi = mean(l2hdit0, na.rm = TRUE))
+
+```
+
+###3.b) 19.- Reorganize gender [0=male, 1=female]
+
+```{r}
+df_nationalism <- df_nationalism %>%
+  mutate(gender = case_when(
+    gender == 1 ~ 0,
+    gender == 2 ~ 1,
+    TRUE ~ NA_real_
+  ))
+
+```
+
+#4. Merge additional datasets
+##4. a) Merge dataset with International Immigration Rate
+
+```{r}
+df_immig <- read.csv("C:/Users/oscar/Documents/Projects/Paper- Lv2EffectsOnNationalIdentity/Quantitative Analysis/Data/df_immig_rate.csv", header = TRUE, sep = ",")
+
+df_immig <- df_immig %>%
+  select(countryname, X2015)
+
+df_nationalism <- merge(df_nationalism, df_immig, by = "countryname")
+
+df_nationalism <- df_nationalism %>%
+  rename(l2immigrate = X2015)
+
+
+```
+
+#5. Final procedures
+##5.a) Select only possibly useful variables variables:
+
+```{r}
+df_nationalism <- df_nationalism %>%
+  select(c(countryyear,
+           countryname,
+           polweight,
+           generation,
+           age,
+           agerange,
+           parentforeign,
+           selfpleftright,
+           electionyear,
+           edulvl,
+           urbanrural,
+           outergroup,
+           nationalidentity,
+           gender,
+           quintinc, 
+           parentforeign,
+           ougrcusttrad,
+           ougrmajwill,
+           econ_immig,
+           cult_immig,
+           sec_immig,
+           perc_immig_effect,
+           birthplace,
+           ancestry,
+           language,
+           customstraditions,
+           ethnic,
+           cultural,
+           eth_vs_cult,
+           immigrant,
+           l2hdi,
+           l2immigrate
+           ))
+```
+
+##5.b) Create unique study var countrynameyear, l2 identifier
+
+```{r}
+# Generate the new variable countrynameyear
+df_nationalism <- df_nationalism %>%
+  mutate(countrynameyear = paste(countryname, as.character(electionyear), sep = "_"))
+
+```
+
+##5.c) Save clean dataset:
+
+```{r}
+write.csv(df_nationalism, file = "C:/Users/oscar/Documents/Projects/Paper- Lv2EffectsOnNationalIdentity/Quantitative Analysis/Data/df_nationalism.csv", row.names = FALSE)
+```

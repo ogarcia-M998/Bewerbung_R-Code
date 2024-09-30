@@ -1,0 +1,431 @@
+---
+title: "Data analysis via single and multilevel regression"
+author: "Oscar Garcia"
+date: "2024-09-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Summary
+The following R.Markdown script (work in progress) aims to conduct a series of single and multilevel regression analyses. It is part of a larger study in progress exploring national identity typologies.
+
+As independent variables, it focuses on:
+- Core demographic variables (level-1, individual): age (agerange), education (edulvl) and quintile income (quintinc).
+- Immigration rate (level-2, country) (immigrate).
+
+As dependent variables, it leverages:
+- Difference between ethnic and cultural national identity scores (eth_vs_cult).
+- Overall national identity score (nationalidentity).
+
+On a third step, it tests the effect of immigrate, eth_vs_cult and nationalidentity on rejection of multiculturalism.
+
+#1. Preparatory tasks
+
+##1.a) Reset space and charge libraries
+
+```{r, echo=FALSE}
+rm(list=ls()) # Clean workspace
+options(scipen=10000) # Set scientific notation
+library(tidyverse)
+library(gridExtra)
+library(stargazer) # For regression tables
+library(lme4) # For mixed effects models
+library(MuMIn) # For Conditional R² in mixed effects models
+library(sjPlot) # For creating mixed effects' regression tables
+library(sjmisc)
+library(sjlabelled)
+
+```
+
+##1.b) Open dataset 
+
+```{r}
+df_nationalism <- read.csv("C:/Users/oscar/Documents/Projects/Paper- Lv2EffectsOnNationalIdentity/Quantitative Analysis/Data/df_nationalism.csv", header = TRUE, sep = ",", encoding = "UTF-8")
+
+```
+
+##1.c) Prepare the data
+
+###1.c) 1.- Delete observations with at least one parent born outside of country or, where this is not available, the respondant born outside of country
+
+```{r}
+df_nationalism <- df_nationalism %>%
+  filter(countryname %in% c("Mexico", "Australia", "Japan", "Netherlands", "Norway", "South Korea", "Uruguay") & immigrant == 1 | (!(countryname %in% c("Mexico", "Australia", "Japan", "Netherlands", "Norway", "South Korea", "Uruguay") & parentforeign == 1)))
+
+```
+
+
+###1.c) 2.- Delete observations with missing values across any of the key variables
+
+```{r}
+# Delete missing cases 
+df_nationalism <- df_nationalism %>%
+  filter(complete.cases(eth_vs_cult, 
+                        edulvl, 
+                        quintinc,
+                        l2immigrate, 
+                        ougrcusttrad,
+                        nationalidentity,
+                        agerange,
+                        gender,
+                        age
+                        ))
+
+```
+
+#2. Descriptive analyses
+##2. a) Create descriptive statistics table of groups
+
+```{r}
+# Summarize data by group
+summary_by_group <- df_nationalism %>%
+  # Filter by groups defined in the vector
+  filter(countryname %in% df_nationalism$countryname) %>%
+  # Group by country and year
+  group_by(countryname) %>%
+  # Summarize with desired statistics, handling NAs with na.rm=TRUE
+  summarise(
+    N = n(),  # Count observations (number of individuals)
+    Mean_Age = round(mean(age, na.rm = TRUE), digits = 2),  # Mean age (ignoring NAs)
+    SD_Age = round(sd(age, na.rm = TRUE), digits = 2),  # Standard deviation of age (ignoring NAs)
+    Pct_Female = round(mean(gender == 1, na.rm = TRUE), digits = 4) * 100  # Percent female (ignoring NAs)
+  )
+
+# Summarize data by group
+summary_total <- df_nationalism %>%
+  # Summarize with desired statistics, handling NAs with na.rm=TRUE
+  summarise(
+    N = n(),  # Count observations (number of individuals)
+    Mean_Age = round(mean(age, na.rm = TRUE), digits = 2),  # Mean age (ignoring NAs)
+    SD_Age = round(sd(age, na.rm = TRUE), digits = 2),  # Standard deviation of age (ignoring NAs)
+    Pct_Female = round(mean(gender == 1, na.rm = TRUE), digits = 4) * 100  # Percent female (ignoring NAs)
+  )
+
+# Add a "countryname" column to summary_total
+summary_total <- summary_total %>%
+  mutate(countryname = "Total")
+
+# Combine the two tables
+combined_summary <- bind_rows(summary_by_group, summary_total)
+
+# Print the combined summary table
+print(combined_summary)
+
+```
+
+##2. b) Create subset for analysis and perform some descriptive analyses to analyse outcome variables
+###2. b) 1.- Difference between ethnic and cultural
+
+```{r}
+summary(df_nationalism$eth_vs_cult)
+
+sd(df_nationalism$eth_vs_cult)
+
+hist(df_nationalism$eth_vs_cult, breaks = 20, main = "Histogram of Ethnic vs Cultural Nationalism", xlab = "Ethnic - Cultural Nationalism", col = "lightblue")
+
+# Create a weighted, stacked histogram with ggplot2
+ggplot(df_nationalism, aes(x = eth_vs_cult, fill = countryname, weight = polweight)) +
+  geom_histogram(bins = 20, color = "black") +
+  scale_fill_manual(values = rainbow(length(unique(df_nationalism$countryname)))) +
+  labs(title = "Weighted Histogram of Ethnic vs Cultural Nationalism",
+       x = "Ethnic - Cultural Nationalism",
+       y = "Weighted Frequency") +
+  theme_minimal()
+
+
+summary(df_nationalism$polweight)
+plot(density(df_nationalism$eth_vs_cult), main = "Density Plot of Ethnic vs Cultural Nationalism", xlab = "Ethnic - Cultural Nationalism", col = "blue")
+
+boxplot(df_nationalism$eth_vs_cult, main = "Boxplot of Ethnic vs Cultural Nationalism", ylab = "Ethnic - Cultural Nationalism", col = "lightgreen")
+
+
+country_averages <- df_nationalism %>%
+  group_by(countryname) %>%
+  summarize(mean_eth_vs_cult = mean(eth_vs_cult, na.rm = TRUE),
+            mean_l2immigrate = mean(l2immigrate, na.rm = TRUE),
+            mean_l2hdi = mean(l2hdi, na.rm = TRUE),
+            mean_nationalidentity = mean(nationalidentity, na.rm = TRUE),
+            mean_l2gini = mean(l2gini, na.rm = TRUE))
+
+# Histogram where each country equals 1
+hist(country_averages$mean_eth_vs_cult,
+     breaks = 10,  # You can adjust the number of bins
+     main = "Histogram of Ethnic vs Cultural Nationalism by Country",
+     xlab = "Mean Ethnic - Cultural Nationalism",
+     col = "lightblue",
+     border = "black")
+
+```
+
+###2. b) 2.- National identity
+
+```{r}
+summary(df_nationalism$nationalidentity)
+
+sd(df_nationalism$nationalidentity)
+
+hist(df_nationalism$nationalidentity, breaks = 20, main = "Histogram of National Identity", xlab = "National Identity Score", col = "lightblue")
+
+# Create a weighted, stacked histogram with ggplot2
+ggplot(df_nationalism, aes(x = nationalidentity, fill = countryname, weight = polweight)) +
+  geom_histogram(bins = 20, color = "black") +
+  scale_fill_manual(values = rainbow(length(unique(df_nationalism$countryname)))) +
+  labs(title = "Weighted Histogram of National Identity Score",
+       x = "Ethnic - Cultural Nationalism",
+       y = "Weighted Frequency") +
+  theme_minimal()
+
+
+summary(df_nationalism$polweight)
+plot(density(df_nationalism$nationalidentity), main = "Density Plot of National Identity", xlab = "National Identity Score", col = "blue")
+
+boxplot(df_nationalism$nationalidentity, main = "Boxplot of National Identity", ylab = "National Identity Score", col = "lightgreen")
+
+# Histogram where each country equals 1
+hist(country_averages$mean_nationalidentity,
+     breaks = 10,  # You can adjust the number of bins
+     main = "Histogram of Mean National Identity by Country",
+     xlab = "Mean National Identity",
+     col = "lightblue",
+     border = "black")
+
+```
+
+###2. b) 3.- Rejection of multiculturalism
+
+```{r}
+summary(df_nationalism$ougrcusttrad)
+
+sd(df_nationalism$ougrcusttrad)
+
+hist(df_nationalism$ougrcusttrad, breaks = 20, main = "Histogram of National Identity", xlab = "National Identity Score", col = "lightblue")
+
+# Create a weighted, stacked histogram with ggplot2
+ggplot(df_nationalism, aes(x = ougrcusttrad, fill = countryname, weight = polweight)) +
+  geom_histogram(bins = 20, color = "black") +
+  scale_fill_manual(values = rainbow(length(unique(df_nationalism$countryname)))) +
+  labs(title = "Weighted Histogram of National Identity Score",
+       x = "Ethnic - Cultural Nationalism",
+       y = "Weighted Frequency") +
+  theme_minimal()
+
+
+summary(df_nationalism$polweight)
+plot(density(df_nationalism$ougrcusttrad), main = "Density Plot of National Identity", xlab = "National Identity Score", col = "blue")
+
+boxplot(df_nationalism$ougrcusttrad, main = "Boxplot of National Identity", ylab = "National Identity Score", col = "lightgreen")
+
+# Histogram where each country equals 1
+hist(country_averages$mean_ougrcusttrad,
+     breaks = 10,  # You can adjust the number of bins
+     main = "Histogram of Mean National Identity by Country",
+     xlab = "Mean National Identity",
+     col = "lightblue",
+     border = "black")
+
+```
+
+### 2.c).- Regression plots: 
+Using country averages to build level 2 regression plots showing the effect of 
+the immigration rate on the mean difference between ethnic and cultural national 
+identity scores and on the overall mean national identity score
+```{r}
+library(ggrepel)
+
+# Create the scatter plot with country averages
+ggplot(country_averages, aes(x = mean_l2immigrate, y = mean_eth_vs_cult)) +
+  geom_point(color = "blue") +
+  geom_smooth(method = "lm", formula = y ~ x, color = "darkgreen", se = FALSE) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2), color = "red", se = FALSE) +  # Add the regression line
+  geom_text_repel(aes(label = countryname), 
+                  box.padding = 0.35, 
+                  point.padding = 0.5, 
+                  segment.color = 'grey50') +
+  # Tags for the regression lines
+  annotate("text", x = 0, y = -1.3, 
+           label = "y ~ x*ß", color = "darkgreen", hjust = 0, vjust = 1, fontface = "italic") +
+  annotate("text", x = 0, y = -1.15, 
+           label = "y ~ (x^2)*ß", color = "red", hjust = 0, vjust = 0, fontface = "italic") +
+  labs(title = "Ethnic vs Cultural National Identity and Immigration Rate, by Country",
+       x = "Immigration Rate",
+       y = "Mean Ethnic - Cultural National Identity") #+
+  #theme_minimal()
+
+
+# Create the scatter plot with country averages
+ggplot(country_averages, aes(x = mean_l2immigrate, y = mean_nationalidentity)) +
+  geom_point(color = "blue") +
+  geom_smooth(method = "lm", formula = y ~ x, color = "darkgreen", se = FALSE) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2), color = "red", se = FALSE) +  # Add the regression line
+  geom_text_repel(aes(label = countryname), 
+                  box.padding = 0.35, 
+                  point.padding = 0.5, 
+                  segment.color = 'grey50') +
+  # Tags for the regression lines
+  annotate("text", x = 25, y = 2.5, 
+           label = "y ~ x*ß", color = "darkgreen", hjust = 0, vjust = 1, fontface = "italic") +
+  annotate("text", x = 25, y = 2.3, 
+           label = "y ~ (x^2)*ß", color = "red", hjust = 0, vjust = 0, fontface = "italic") +
+  labs(title = "Overall National Identity and Immigration Rate, by Country",
+       x = "Immigration rate",
+       y = "Overall National Identity") #+
+  #theme_minimal()
+
+```
+
+#3. Regression analysis
+##3. a) Regression on difference between ethnic and cultural
+
+```{r}
+model_1 <- lm(eth_vs_cult ~ edulvl, data = df_nationalism, weights = polweight)
+
+model_2 <- lm(eth_vs_cult ~ quintinc, data = df_nationalism, weights = polweight)
+
+model_3 <- lm(eth_vs_cult ~ agerange, data = df_nationalism, weights = polweight)
+
+model_4 <- lm(eth_vs_cult ~ edulvl + quintinc + agerange, data = df_nationalism, weights = polweight)
+
+model_5 <- lm(eth_vs_cult ~ edulvl + quintinc + I(agerange^2), data = df_nationalism, weights = polweight)
+
+stargazer(model_1, model_2, model_3, model_4, model_5,
+          type = "text",  # "text" will print the table in the R console
+          title = "Regression Results", 
+          align = TRUE, 
+          dep.var.labels = "Ethnic vs Cultural Nationalism",
+          covariate.labels = c("Education Level", "Income Quintile", "Age Range"),
+          no.space = TRUE)
+
+```
+
+##3. b) Regression on overall national identity
+
+```{r}
+model_1 <- lm(nationalidentity ~ edulvl, data = df_nationalism, weights = polweight)
+
+model_2 <- lm(nationalidentity ~ quintinc, data = df_nationalism, weights = polweight)
+
+model_3 <- lm(nationalidentity ~ agerange, data = df_nationalism, weights = polweight)
+
+model_4 <- lm(nationalidentity ~ edulvl + quintinc + agerange, data = df_nationalism, weights = polweight)
+
+model_5 <- lm(nationalidentity ~ edulvl + quintinc * agerange, data = df_nationalism, weights = polweight)
+
+stargazer(model_1, model_2, model_3, model_4, model_5,
+          type = "text",  # "text" will print the table in the R console
+          title = "Regression Results", 
+          align = TRUE, 
+          dep.var.labels = "Overall National Identity Score",
+          covariate.labels = c("Education Level", "Income Quintile", "Age Range"),
+          no.space = TRUE)
+
+```
+
+#4. Mixed effects regression models
+##4. a) Conduct mixed effects models (fixed slopes) on mediators:
+###4. a) 1.- Level 2 effects on mediators (diff between ethnic and cultural AND overall national identity score)
+
+```{r include=FALSE}
+# Level 2 effects on difference between ethnic and cultural
+
+print(" ")
+print("Model 1: Linear Effect")
+print(" ")
+
+model_1 <- lmer(eth_vs_cult ~ l2immigrate + (1 | countryname), data = df_nationalism)
+
+summary(model_1)
+
+print(" ")
+print("Model 2: Cuadratic effect")
+print(" ")
+
+model_2 <- lmer(eth_vs_cult ~ l2immigrate + I(l2immigrate^2) + (1 | countryname), data = df_nationalism)
+
+summary(model_2)
+
+# Level 2 effects on overall national identity level
+
+print(" ")
+print("Model 3: Linear Effect")
+print(" ")
+
+model_3 <- lmer(nationalidentity ~ l2immigrate + (1 | countryname), data = df_nationalism)
+
+summary(model_3)
+
+print(" ")
+print("Model 4: Cuadratic effect")
+print(" ")
+
+model_4 <- lmer(nationalidentity ~ l2immigrate + I(l2immigrate^2) + (1 | countryname), data = df_nationalism)
+
+summary(model_4)
+
+# Create a tabular summary of the models
+tab_model(model_1, model_2, model_3, model_4,
+          title = "Level 2 Effects of Immigration Rate and HDI on Ethnic vs Cultural Nationalism",
+          dv.labels = c("Model 1", "Model 2", "Model 3", "Model 4"),
+          show.re.var = TRUE, # Show random effects variance
+          show.icc = TRUE,    # Show Intraclass Correlation Coefficient
+          show.aic = TRUE,    # Show AIC value
+          show.r2 = TRUE,     # Show R-squared
+          digits = 4,
+          file = "C:/Users/oscar/Documents/Projects/Paper- Lv2EffectsOnNationalIdentity/Quantitative Analysis/Model fits/Crossnational - Regressions/ethvscult_regression_table.html")
+
+```
+
+##4. b) 2.- Conduct mixed effects models (fixed slopes) on outcome variable (rejecting multiculturalism):
+Interacting eth_vs_cult (difference between ethnic and cultural national identity 
+scores) with nationalidentity (overall national identity score across ethnic and 
+cultural types), we can observe the differential effects of national identity and 
+of whether this national identity is predominantly cultural or ethnic on negative 
+attitudes towards immigrants
+
+```{r include=FALSE}
+print(" ")
+print("Model 1")
+print(" ")
+
+model_1 <- lmer(ougrcusttrad ~ l2immigrate + (1 | countryname), data = df_nationalism)
+
+summary(model_1)
+
+print(" ")
+print("Model 2")
+print(" ")
+
+model_2 <- lmer(ougrcusttrad ~ eth_vs_cult + nationalidentity + (1 | countryname), data = df_nationalism)
+
+summary(model_2)
+
+print(" ")
+print("Model 3")
+print(" ")
+
+model_3 <- lmer(ougrcusttrad ~ eth_vs_cult * nationalidentity + (1 | countryname), data = df_nationalism)
+
+summary(model_3)
+
+print(" ")
+print("Model 4")
+print(" ")
+
+model_4 <- lmer(ougrcusttrad ~ l2immigrate + eth_vs_cult * nationalidentity + (1 | countryname), data = df_nationalism)
+
+summary(model_4)
+
+# Create a tabular summary of the models
+tab_model(model_1, model_2, model_3, model_4,
+          title = "Level 2 and 1 effects on Rejecting Multiculturalism",
+          dv.labels = c("Model 1", "Model 2", "Model 3", "Model 4"),
+          show.re.var = TRUE, # Show random effects variance
+          show.icc = TRUE,    # Show Intraclass Correlation Coefficient
+          show.aic = TRUE,    # Show AIC value
+          show.r2 = TRUE,     # Show R-squared
+          digits = 4,
+          file = "C:/Users/oscar/Documents/Projects/Paper- Lv2EffectsOnNationalIdentity/Quantitative Analysis/Model fits/Crossnational - Regressions/ougrcusttrad_regression_table.html")
+
+```

@@ -1,0 +1,162 @@
+---
+title: "Shiny app"
+author: "Oscar Garcia"
+date: "2024-09-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Summary
+The following R.Markdown script sets up a Shiny app for visualizing data from the CSES Module 5 on national identity. The app allows to select a national identity variable (e.g., birthplace, language), a predictor (e.g., education, age), and filter by country. The app generates two plots: one showing the frequency distribution of the selected variable and another showing the effect of the chosen predictor on it, with a scatter plot and regression line to illustrate the relationship. The app combines an interactive UI and server-side logic to create these visualizations.
+
+#1. Preparatory tasks
+
+##1.a) Reset space and charge libraries
+
+```{r, echo=FALSE}
+rm(list=ls()) # Clean workspace
+options(scipen=10000) # Set scientific notation
+library(tidyverse)
+library(ggplot2)
+library(shiny)
+library(shinydashboard)
+
+```
+
+##1.b) Open dataset 
+The dataset can be retrieved in "https://cses.org/data-download/cses-module-5-2016-2021/" as a CSV.file. It was already wrangled with in a previous step.
+
+```{r}
+df_nationalism <- read.csv("C:/Users/oscar/Documents/Projects/Paper- Lv2EffectsOnNationalIdentity/Quantitative Analysis/Data/df_nationalism.csv", header = TRUE, sep = ",", encoding = "UTF-8")
+
+```
+
+##1.c) Prepare the data
+###1.c) 1.- Delete observations with at least one parent born outside of [country] or the respondant born outside of country
+
+```{r}
+df_nationalism <- df_nationalism %>%
+  filter(countryname %in% c("Mexico", "Australia", "Japan", "Netherlands", "Norway", "South Korea", "Uruguay") & immigrant == 1 | (!(countryname %in% c("Mexico", "Australia", "Japan", "Netherlands", "Norway", "South Korea", "Uruguay") & parentforeign == 1)))
+
+```
+
+```{r}
+df_nationalism <- df_nationalism %>%
+  filter(complete.cases(selfpleftright, edulvl, agerange, birthplace, ancestry, language, customs))
+
+```
+
+
+# 2. Set up shiny environment
+## 2. a) Define UI
+
+```{r}
+ui <- fluidPage(
+  titlePanel("Nationalism Data Frequency Distribution"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("variable", 
+                  "Select a Variable to Visualize:", 
+                  choices = c("Relevance of Birthplace for National Identity" = "birthplace", 
+                              "Relevance of Ancestry for National Identity" = "ancestry", 
+                              "Relevance of Language for National Identity" = "language", 
+                              "Relevance of Customs for National Identity" = "customs",
+                              "Ethnic National Identity" = "ethnic",
+                              "Cultural National Identity" = "cultural",
+                              "Overall National Identity" = "nationalidentity",
+                              "Diference between Ethnic and Cultural National Identity" = "eth_vs_cult"
+                              )),
+      selectInput("predictor",
+                  "Select Potential Predictor:",
+                  choices = c("Education Level" = "edulvl",
+                              "Age Range" = "agerange",
+                              "Left-Right Scale" = "selfpleftright")),
+      
+      selectInput("country", 
+                  "Filter by Country:", 
+                  choices = c("All Countries", unique(df_nationalism$countryname)),
+                  selected = "All Countries"),
+      width = 3
+    ),
+    
+    mainPanel(
+      plotOutput("distPlot"), # First plot (frequency distribution)
+      plotOutput("effectPlot") # Second plot (effect of predictor)
+    )
+  )
+)
+
+```
+
+## 2. b) Define server logic
+
+```{r}
+server <- function(input, output) {
+  output$distPlot <- renderPlot({
+    # Get the selected variable and country from input
+    selected_var <- input$variable
+    selected_country <- input$country
+    
+    # Filter data based on the selected country
+    filtered_data <- if (selected_country == "All Countries") {
+      df_nationalism
+    } else {
+      subset(df_nationalism, countryname == selected_country)
+    }
+    
+    # Plot frequency distribution
+    ggplot(filtered_data, aes_string(x = selected_var)) +
+      geom_bar(fill = "steelblue") +
+      labs(title = paste("Frequency Distribution of", selected_var, 
+                         if (selected_country != "All Countries") paste("in", selected_country) else ""),
+           x = selected_var,
+           y = "Count") +
+      theme_minimal()
+  })
+  #Effect of predictor on predicted variable (second plot)
+  output$effectPlot <- renderPlot({
+    selected_var <- input$variable
+    selected_predictor <- input$predictor
+    selected_country <- input$country
+    # Filter data for total of countries or selected country
+    filtered_data <- if(selected_country == "All Countries") {
+      df_nationalism
+    } else {
+      subset(df_nationalism, countryname == selected_country)
+    }
+    # Ensure no missing values for the selected variable or predictor
+    filtered_data <- filtered_data %>%
+      filter(!is.na(get(selected_var)) & !is.na(get(selected_predictor)))
+    # If there is insufficient data to plot, show a message
+    if (nrow(filtered_data) == 0) {
+      return(NULL)
+    }
+    # Calculate the average of the selected variable for each level of the predictor
+    summary_data <- filtered_data %>%
+      group_by_at(selected_predictor) %>%
+      summarise(mean_value = mean(get(selected_var), na.rm = TRUE))
+    # Plot the scatter plot with mean levels and a regression line
+    ggplot(filtered_data, aes_string(x = selected_predictor, y = selected_var)) +
+      geom_point(position = position_jitter(width = 0.2, height = 0), alpha = 0.6, color = "blue") + # Gitter points allow to avoid overlap
+      geom_line(data = summary_data, aes_string(x = selected_predictor, y = "mean_value"), color = "red", size = 1.5) + # Line for mean values
+      geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") + # Regression line
+      labs(title = paste("Effect of", selected_predictor, "on", selected_var),
+           x = selected_predictor,
+           y = paste("Average", selected_var)) + 
+      theme_minimal()
+                   
+  })
+}
+
+```
+
+## 2. c) Run app
+
+```{r}
+shinyApp(ui = ui, server = server)
+
+```
